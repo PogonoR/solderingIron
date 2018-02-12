@@ -69,15 +69,14 @@ void loop() {
   int val=analogRead(pot_in);								// read controller setting
   float perc = val*10;										// translate RAW controller input into % PWR
   perc = perc /102;
-  float temp_set=map(val, 0,1023,0,450);
+  int temp_set=map(val, 0,1023,0,450);
   /************** heating ******************/
   val=map(val,0,1023,0,255);								// use controller setting and convert it into heating drvier
   analogWrite(heating_pin,val);								// send driver setting to controller
   /************** serial ******************/
- Serial.print("T: "); Serial.print(temp);Serial.print("("); Serial.print(temp_read);Serial.print(") ");
- Serial.print("I: "); Serial.print(current);Serial.print("("); Serial.print(current_read);Serial.print(") ");
- Serial.print("A_set: "); Serial.print(val);Serial.print(" ("); Serial.print(perc);Serial.print("% )   ");
- Serial.print("T_set: "); Serial.print(temp_set);Serial.print(" C");
+ Serial.print("T: "); Serial.print(temp);Serial.print("("); Serial.print(temp_read);Serial.print(")  ");
+ Serial.print("I: "); Serial.print(current);Serial.print("("); Serial.print(current_read);Serial.print(")  ");
+ Serial.print("T_set: "); Serial.print(temp_set);Serial.print(" C  ");
  Serial.print("H: "); Serial.print(val);
  Serial.print("\n");
 }
