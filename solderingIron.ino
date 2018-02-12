@@ -1,5 +1,5 @@
 //*********************** header *******************************
-#define version "v0.3"
+#define version "v0.4"
 #define date "2018-02-12"
 /* changelog:
   v0.4 (2018-02-13)
