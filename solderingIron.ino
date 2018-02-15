@@ -1,7 +1,10 @@
 //*********************** header *******************************
-#define version "v0.6"
+#define version "v0.6.1"
 #define date "2018-02-15"
 /* changelog:
+ *v.06.1 (2018-02-15)
+  -optimized firmware to update serial output or oled screen only when any value changes,
+  -additionally moved driving iron power to separate integer to avoid using raw analog input as power when reached max temp and not cooled down below temp comfort window yet.
  *v.06 (2018-02-15)
   -OLED now functional, showing set temperature, power and temp_overshoot bar graphs
   v.05 (2018-02-14)
@@ -18,6 +21,7 @@
 #define heating_pin 9                                        // pin for driving heating controller
 #define temp_window 10                                       // define temperature comfort window
 boolean heating = 0;
+int power;
 /************** control ******************/
 #define pot_in A0                                            // pin to read controller setting
 #include <ResponsiveAnalogRead.h>                            // include analog input filtering library
@@ -73,57 +77,63 @@ void loop() {
   if (millis() - tick > 50) {                                // filter this operation every (XX) often
     analogWrite(heating_pin, 0);                             // turn off heating
     delay(1);                                                // wait 5 millis for currents to drop
-    analog_temp.update();                                    // perform temperature measurement
-    temp_read = analog_temp.getValue();                      // pull in filtered temperature reading
-    temp = map(temp_read, 0, 1023, 20, 450);                 // decode temp reading to temperature (C)
+	if (analog_temp.hasChanged()){
+      ananog_temp.update();                                  // perform temperature measurement
+      temp_read = analog_temp.getValue();                    // pull in filtered temperature reading
+      temp = map(temp_read, 0, 1023, 20, 450);               // decode temp reading to temperature (C)
+	}
     tick = millis();                                         // refresh time snapshot
   } else {                                                   // perform action when not taking temp measurements
-    analog_current.update();                                 // perform current measurement
-    current_read = analog_current.getValue();                // pull in filtered current reading
-    current = current_read * 3;                              // convert measurement into current value (A)
-    current /= 1023;
+    if(analog_current.hasChanged();){
+	  analog_current.update();                               // perform current measurement
+      current_read = analog_current.getValue();              // pull in filtered current reading
+      current = current_read * 3;                            // convert measurement into current value (A)
+      current /= 1023;
+	}
   };
   /************** control ******************/
   //int val = analogRead(pot_in);                            // read controller setting
-  analog_set.update();                                       // get data from analog input
-  int val = analog_set.getValue();                               // pull in filtered inpu setting reading
-  float perc = val * 10;                                     // translate RAW controller input into % PWR
-  perc = perc / 102;
-  int temp_set = map(val, 0, 1023, 20, 450);                  // translated input to temperature (C)
+  if(analog_set.hasChanged()){
+    analog_set.update();                                     // get data from analog input
+    int val = analog_set.getValue();                         // pull in filtered inpu setting reading
+    float perc = val * 10;                                   // translate RAW controller input into % PWR
+    perc = perc / 102;
+    int temp_set = map(val, 0, 1023, 20, 450);               // translated input to temperature (C)
   /************** heating ******************/
   if ( temp < (temp_set - temp_window)) {                    // when tip temp is way to low, 
-    val = 1023;
+    power = 1023;
     heating = 1;                                             //set heating flag on
   }
   if (temp < temp_set && heating) {                          // when temp is within comfort window, but in heating cycle
-    val = 1023;
+    power = 1023;
   }
   if (temp >= temp_set) {                                    // when temperature reaches set one
-    val = 0;                                                 // stop heating
+    power = 0;                                               // stop heating
     heating = 0;                                             // remove heating cycle flag -> cooling cycle
   }
-  val = map(val, 0, 1023, 0, 255);                           // use controller setting and convert it into heating drvier
-  analogWrite(heating_pin, val);                             // send driver setting to controller
+  power = map(power, 0, 1023, 0, 255);                       // use controller setting and convert it into heating drvier
+  analogWrite(heating_pin, power);                           // send driver setting to controller
   /************** serial ******************/
-  Serial.print("T: "); Serial.print(temp); Serial.print("("); Serial.print(temp_read); Serial.print(")  ");
-  Serial.print("I: "); Serial.print(current); Serial.print("("); Serial.print(current_read); Serial.print(")  ");
-  Serial.print("T_set: "); Serial.print(temp_set); Serial.print(" C  ");
-  Serial.print("H: "); Serial.print(val);
+  if (analog_set.hasChanged() || analog_current.hasChanged() || analog_temp.hasChanged()) {
+    Serial.print("T: "); Serial.print(temp); Serial.print("("); Serial.print(temp_read); Serial.print(")  ");
+    Serial.print("I: "); Serial.print(current); Serial.print("("); Serial.print(current_read); Serial.print(")  ");
+    Serial.print("T_set: "); Serial.print(temp_set); Serial.print(" C  ");
+   Serial.print("H: "); Serial.print(val);
   
   /************** display *****************/
-  String value_s=dtostrf(temp_set,3,0,buffor);
-  draw_value(value_s);
-  draw_power(val);
-  draw_ontarget(temp, temp_set);
-Serial.print("\n");
-delay(50);
+    String value_s=dtostrf(temp_set,3,0,buffor);             // convert set temparature to string for sisplay
+    draw_value(value_s);                                     // send value as string to display
+    draw_power(power);                                       // draw power bar
+    draw_ontarget(temp, temp_set);                           // draw temperature overshoot bar graph
+    Serial.print("\n");                                      // finish serial output line
+  };
+  delay(20);                                                 // wait a bit for the next iteration loop
 }
 
 /**************************************************************************************************/
 
 /************************ oled ***************************/
-void init_OLED(){
-  Serial.println("hello display");
+void init_OLED(){                                            // OLED initialization void
   display.begin(SSD1306_SWITCHCAPVCC, 0x3C, false);  // initialize with the I2C addr 0x3C (for the 128x32)
   // Clear the display buffer.
   display.clearDisplay();
@@ -133,15 +143,9 @@ void init_OLED(){
   display.setCursor(20,10);
   display.println("TS_T-12");
   display.display();
-  //delay(interval);
   delay(1000);
-  //float value=0.000;
-  //dtostrf(FLOAT,WIDTH,PRECSISION,BUFFER);
-  //String value_s=dtostrf(value,5,2,buffor);
-  //value_s="-.--- ";
   display.clearDisplay();
-  //display_show(mode, value_s);
-}
+  }
 /*
 void display_show(int mode, String value_to_display){
   //oled_timed_out=0;
@@ -155,9 +159,7 @@ void draw_menu(int mode){ //mode menu constructor
     display.setTextColor(1,0);
     display.setTextSize(1);
     display.setCursor(0,0);
-   
-		display.print("(D)");
-       
+	display.print("(D)");
     display.println("");
     display.display();
 }
