@@ -1,7 +1,9 @@
 //*********************** header *******************************
-#define version "v0.4"
-#define date "2018-02-12"
+#define version "v0.5"
+#define date "2018-02-14"
 /* changelog:
+  v.05 (2018-02-14)
+  -added OLED screen support
   v0.4 (2018-02-13)
   -actually driving temperature
   v0.3 (2018-02-13)
@@ -19,7 +21,7 @@ boolean heating = 0;
 #include <ResponsiveAnalogRead.h>                            // include analog input filtering library
 ResponsiveAnalogRead analog_set(pot_in, true);               // create input setting reading object
 
-/************** measure *****************/
+/************** measure ******************/
 #define temp_read_pin A5                                     // pin for reading temperature
 #define current_read_pin A4                                  // pin for checking current
 ResponsiveAnalogRead analog_temp(temp_read_pin, true);       // create temperature reading object
@@ -29,6 +31,13 @@ int temp_read;                                               // placeholder for 
 float temp;                                                  // placeholder to hold decoded temperature value
 int current_read;                                            // placeholder for current reading value
 float current;                                               // placeholder to hold decoded current value
+
+/************** display ******************/
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#define OLED_RESET 4
+Adafruit_SSD1306 display(OLED_RESET);
+
 
 
 /**************************************************************************************************/
@@ -47,9 +56,12 @@ void setup() {
   /************** control ******************/
   pinMode(pot_in, INPUT);                                    // init controller setting pin
 
-  /************** measure *****************/
+  /*************** measure *****************/
   pinMode(temp_read_pin, INPUT);                             // init measure pin: for temperature
   pinMode(current_read_pin, INPUT);                          // init measure pin: for current
+  
+  /*************** display *****************/
+  init_OLED();
 }
 
 /************************************************************************************************/
@@ -101,3 +113,102 @@ void loop() {
 
 /**************************************************************************************************/
 
+/************************ oled ***************************/
+void init_OLED(){
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);  // initialize with the I2C addr 0x3C (for the 128x32)
+  // Clear the display buffer.
+  display.clearDisplay();
+  display.setRotation(2);
+  display.setTextSize(2);
+  display.setTextColor(WHITE);
+  display.setCursor(0,0);
+  display.println("TS_T-12");
+  display.display();
+  //delay(interval);
+  delay(1000);
+  float value=0.000;
+  //dtostrf(FLOAT,WIDTH,PRECSISION,BUFFER);
+  String value_s=dtostrf(value,5,2,buffor);
+  value_s="-.--- ";
+  display.clearDisplay();
+  //display_show(mode, value_s);
+	#endif
+}
+
+void display_show(int mode, String value_to_display){
+  //oled_timed_out=0;
+  //reset_timeout();
+  //draw_menu(mode);
+	draw_value(value_to_display);
+}
+
+void draw_menu(int mode){ //mode menu constructor
+    //display.clearDisplay();
+    display.setTextColor(1,0);
+    display.setTextSize(1);
+    display.setCursor(0,0);
+    if (mode==1) {
+		display.print("(D)");
+    }else{
+		display.print(" D ");
+    }
+    if (mode==2) {
+		display.print("(R)");
+    }else{
+		display.print(" R ");
+    }
+    if (mode==3) {
+		display.print("(V)");
+    }else{
+		display.print(" V ");
+    }
+    if (mode==4) {
+		display.print("(A)");
+    }else{
+		display.print(" A ");
+    }
+    if (mode==5) {
+		display.print("(C)");
+    }else{
+		display.print(" C ");
+    }
+    if (mode==6) {
+		display.print("(H)");
+    }else{
+		display.print(" H ");
+    }
+    if (mode==7) {
+		display.print("(T)");
+    }else{
+		display.print(" T ");
+    }
+    display.println("");
+    display.display();
+}
+  
+void draw_value(String value_to_display){
+	display.setTextSize(3);
+    display.setCursor(20,11);
+    display.setTextColor(1,0);
+    display.println(value_to_display);
+    display.display();
+}
+
+void oled_display_timeout(){
+  unsigned long now=millis();
+  byte delta;
+  if (oled_timed_out==0 ){
+  	if ( tick<=0 )  {//timeout time
+      display.invertDisplay(false);
+  		display.clearDisplay();
+      display.display();
+      Serial.println(" screen timed out"); 
+  		oled_timed_out=1;
+  	} else { //decrease tick
+      delta=now-last_tick;
+      delta=constrain(delta, 1,1000);
+      tick = tick - delta;
+      last_tick=now;
+  	}
+  }
+}
