@@ -1,7 +1,9 @@
 //*********************** header *******************************
-#define version "v0.6.1"
+#define version "v0.7"
 #define date "2018-02-15"
 /* changelog:
+ *v.07 (2018-02-15)
+  -initial PID implementation
  *v.06.1 (2018-02-15)
   -optimized firmware to update serial output or oled screen only when any value changes,
   -additionally moved driving iron power to separate integer to avoid using raw analog input as power when reached max temp and not cooled down below temp comfort window yet.
@@ -113,28 +115,51 @@ void loop() {
   }
   power = map(power, 0, 1023, 0, 255);                       // use controller setting and convert it into heating drvier
   analogWrite(heating_pin, power);                           // send driver setting to controller
-  /************** serial ******************/
+  /*************** serial ******************/
   if (analog_set.hasChanged() || analog_current.hasChanged() || analog_temp.hasChanged()) {
     Serial.print("T: "); Serial.print(temp); Serial.print("("); Serial.print(temp_read); Serial.print(")  ");
     Serial.print("I: "); Serial.print(current); Serial.print("("); Serial.print(current_read); Serial.print(")  ");
     Serial.print("T_set: "); Serial.print(temp_set); Serial.print(" C  ");
    Serial.print("H: "); Serial.print(val);
   
-  /************** display *****************/
+  /*************** display *****************/
     String value_s=dtostrf(temp_set,3,0,buffor);             // convert set temparature to string for sisplay
     draw_value(value_s);                                     // send value as string to display
     draw_power(power);                                       // draw power bar
     draw_ontarget(temp, temp_set);                           // draw temperature overshoot bar graph
-    Serial.print("\n");                                      // finish serial output line
+    Serial.print("    ");
+	Serial.print(PID_power(temp, temp_set));
+	Serial.print("\n");                                      // finish serial output line
   };
   delay(20);                                                 // wait a bit for the next iteration loop
 }
 
 /**************************************************************************************************/
 
-/************************ oled ***************************/
+/**************** heating ******************/
+long void PID_power(int temp_curr, int temp_set) {
+  long Kp = 2009;
+  long Ki =   16;
+  long Kd = 2048;
+  long  powerr; 
+  int   temp_h0, temp_h1;
+  const byte denominator_p = 11;  
+  
+  long kp = Kp * (temp_h1 - temp_curr);
+  long ki = Ki * (temp_set - temp_curr);
+  long kd = Kd * (temp_h0 + temp_curr - 2*temp_h1);
+  long delta_p = kp + ki + kd;
+  powerr += delta_p; 
+  temp_h1 = temp_curr;
+  long pwr = powerr + (1 << (denominator_p-1));  // prepare the power to delete by denominator, roud the result
+  pwr >>= denominator_p;                        // delete by the denominator
+  pwr
+  return pwr;
+}
+
+/****************** display ****************/
 void init_OLED(){                                            // OLED initialization void
-  display.begin(SSD1306_SWITCHCAPVCC, 0x3C, false);  // initialize with the I2C addr 0x3C (for the 128x32)
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C, false);          // initialize with the I2C addr 0x3C (for the 128x32)
   // Clear the display buffer.
   display.clearDisplay();
   display.setRotation(2);
