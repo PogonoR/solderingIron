@@ -1,9 +1,11 @@
 //*********************** header *******************************
-#define version "v0.8"
-#define date "2018-02-16"
+#define version "v0.9"
+#define date "2018-02-21"
 /* changelog:
+ *v.09 (2018-02-21)
+  -port to pro mini and pin reassignment
  *v.08 (2018-02-16)
-  -initial PID implementation
+  -revert from PID to bang-bang K-delta drive (confirmed working on 24V)
  *v.07 (2018-02-15)
   -initial PID implementation
  *v.06.1 (2018-02-15)
@@ -37,7 +39,7 @@ float error=0;
 int temp_set=20;
 int val=0;
 #define up_pin 10
-#define down_pin 13
+#define down_pin 12
 float button_pressed_cooldown;
 bool button_pressed=0;
 bool longpress=0;
@@ -45,8 +47,8 @@ int delta=0;
 
 
 /************** measure ******************/
-#define temp_read_pin A3                                     // pin for reading temperature
-#define current_read_pin A2                                  // pin for checking current
+#define temp_read_pin A6                                     // pin for reading temperature
+#define current_read_pin A7                                  // pin for checking current
 ResponsiveAnalogRead analog_temp(temp_read_pin, true);       // create temperature reading object
 ResponsiveAnalogRead analog_current(current_read_pin, true); // createcurrent reading object
 unsigned long tick = 0;                                      // placeholder to store time millis snapshots
