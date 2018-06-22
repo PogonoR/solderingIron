@@ -1,7 +1,11 @@
 //*********************** header *******************************
-#define version "v0.9"
-#define date "2018-02-21"
+#define version "v0.11"
+#define date "2018-05-01"
 /* changelog:
+ *v.11 (2018-05-01)
+  -power off feature, pseudo PiD algoritm
+ *v.10 (2018-02-22)
+  -power monitoring feature, overheat protection
  *v.09 (2018-02-21)
   -port to pro mini and pin reassignment
  *v.08 (2018-02-16)
@@ -21,21 +25,39 @@
   -added analog to temperature set conversion
   v0.2 (2018-02-12)
   -added bunch of comments, and header info
+  
+  TODO:
+     - power off
+	 - precise temperature control
+	 - cleaning code (data types, unused variables)
 */
 
+int cycle_time;
+int i;
+int j;
 /************** heating ******************/
 #define heating_pin 9                                        // pin for driving heating controller
 #define temp_window 10                                       // define temperature comfort window
 boolean heating = 0;
 int power;
 //long  powerr=0; 
-int   temp_h0, temp_h1;
+float   temp_h0;
 float error=0;
+int power_points[30];                                        // array to store historical power values for average calcs
+int power_avg=0;                                             //placeholder for power average in time
+#define power_idle 55                                        //threshold of constant power idle
+#define default_time_to_idle 2
+#define default_time_to_poweroff 10
+#define temp_idle 50
+float time_to_idle = default_time_to_idle;                   //minutes to turn idle mode
+bool idle=0;
+bool timedout=0;
+double idle_time_treshold;
 
 /************** control ******************/
-//#define pot_in A0                                            // pin to read controller setting
+//#define pot_in A0                                          // pin to read controller setting
 #include <ResponsiveAnalogRead.h>                            // include analog input filtering library
-//ResponsiveAnalogRead analog_set(pot_in, true);               // create input setting reading object
+//ResponsiveAnalogRead analog_set(pot_in, true);             // create input setting reading object
 int temp_set=20;
 int val=0;
 #define up_pin 10
@@ -68,6 +90,9 @@ char buffor[3];
 
 /**************************************************************************************************/
 void setup() {
+  //memset(power_points,0,sizeof(power_points));             //fills array with zeros
+  reset_time_to_idle();
+  idle_time_treshold = (default_time_to_poweroff*60000)-(default_time_to_idle*60000);
   tick = millis();                                           // initially fill time variable(millis)
   /************** serial ******************/
   Serial.begin(115200);                                      // initialize serial communication
@@ -80,7 +105,7 @@ void setup() {
   pinMode(heating_pin, OUTPUT);                              // init heater driving pin
 
   /************** control ******************/
-  //pinMode(pot_in, INPUT);                                    // init controller setting pin
+  //pinMode(pot_in, INPUT);                                  // init controller setting pin
   pinMode(up_pin, INPUT_PULLUP);
   pinMode(down_pin, INPUT_PULLUP);
   
@@ -95,10 +120,11 @@ void setup() {
 /************************************************************************************************/
 void loop() {
   /************** measure *****************/
-  if (millis() - tick > 50) {                                // filter this operation every (XX) often
+  cycle_time=millis() - tick ;
+  if (cycle_time > 50) {                                // filter this operation every (XX) often
     analogWrite(heating_pin, 0);                             // turn off heating
     delay(1);                                                // wait 5 millis for currents to drop
-	  analog_temp.update();                                    // perform temperature measurement
+	analog_temp.update();                                    // perform temperature measurement
     temp_read = analog_temp.getValue();                    // pull in filtered temperature reading
     temp=temp_read*4.30;
     temp=temp/10.24;
@@ -107,25 +133,28 @@ void loop() {
     tick = millis();                                         // refresh time snapshot
   } else {                                                   // perform action when not taking temp measurements
     analog_current.update();                                // perform current measurement
-	  current_read = analog_current.getValue();              // pull in filtered current reading
+	current_read = analog_current.getValue();              // pull in filtered current reading
     current = current_read * 3;                            // convert measurement into current value (A)
     current /= 1023;
   };
   /************** control ******************/
   //int val = analogRead(pot_in);                            // read controller setting
-    if ( (button_pressed) && ( (millis()-button_pressed_cooldown)>500) ) {
+  if ( (button_pressed) && ( (millis()-button_pressed_cooldown)>500) ) {
     //longpress
     longpress=1;
+	reset_time_to_idle();
   }
   if ((digitalRead(up_pin)==LOW && !(button_pressed) ) || (digitalRead(up_pin)==LOW && longpress )) {
     delta=5;
     button_pressed=1;
     button_pressed_cooldown=millis();
+	reset_time_to_idle();
   }
   if ((digitalRead(down_pin)==LOW && !(button_pressed) ) || (digitalRead(down_pin)==LOW && longpress )) {
     delta=-5;
     button_pressed=1;
     button_pressed_cooldown=millis();
+	  reset_time_to_idle();
   }
 
   if (digitalRead(down_pin)==HIGH && digitalRead(up_pin)==HIGH ) {
@@ -163,15 +192,17 @@ void loop() {
    * 
    */
   //power = map(power, 0, 1023, 0, 255);                       // use controller setting and convert it into heating drvier
-  PID_power_2(temp, temp_set);
+  PID_power_3(temp, temp_set);
+  power_monitoring();
   analogWrite(heating_pin, power);                           // send driver setting to controller
   /*************** serial ******************/
 //  if (analog_set.hasChanged() || analog_current.hasChanged() || analog_temp.hasChanged()) {
  if (analog_current.hasChanged() || analog_temp.hasChanged()) {
-    Serial.print("T: "); Serial.print(temp); Serial.print(" ("); Serial.print(temp_read); Serial.print(")  ");
-    Serial.print("I: "); Serial.print(current); Serial.print(" ("); Serial.print(current_read); Serial.print(")  ");
-    Serial.print("T_set: "); Serial.print(temp_set); Serial.print(" C  ");
+    Serial.print(" T: "); Serial.print(temp); Serial.print(" ("); Serial.print(temp_read); Serial.print(") ");
+    Serial.print("I: "); Serial.print(current); Serial.print(" ("); Serial.print(current_read); Serial.print(") ");
+    Serial.print("T_set: "); Serial.print(temp_set); Serial.print(" C ");
     Serial.print("H: "); Serial.print(power);
+    Serial.print(" tti "); Serial.print(time_to_idle/30000);
 
   /*************** display *****************/
     draw_power(power);                                       // draw power bar
@@ -208,11 +239,17 @@ void PID_power(int temp_curr, int temp_set) {
   //return pwr;
 };
 */
-
+/*
 void PID_power_2(float temp_curr, float temp_set) {
   long Kp = 150;
   long Ki = 0;
   long Kd = 0;
+  if (idle && temp_set>temp_idle) {
+	  temp_set=temp_idle;
+  }
+  if (timedout) {
+    temp_set=20;
+  }
   error =(temp_set - temp_curr);
 //Serial.print("  ");Serial.print(temp_set - temp_curr);Serial.print("  ");
   float kp = Kp * (temp_set - temp_curr);
@@ -221,7 +258,79 @@ void PID_power_2(float temp_curr, float temp_set) {
   temp_h1=temp_h0;
   temp_h0 = temp_curr; 
   power= kp + ki + kd;
+  if((temp_curr - temp_set) > 30 )  {                        //prevent overheat) 
+    power=0;
+  }
   power = constrain (power,0,255);
+}
+*/
+void PID_power_3(float temp_curr, float temp_set) {
+  /*long Kp = 150;
+  long Ki = 0;
+  long Kd = 0;*/
+  if (idle && temp_set>temp_idle) {
+    temp_set=temp_idle;
+  }
+  if (timedout) {
+    temp_set=20;
+  }
+  error =(temp_set - temp_curr);
+  float temp_change=temp_curr-temp_h0;
+  
+//Serial.print("  ");Serial.print(temp_set - temp_curr);Serial.print("  ");
+  /*float kp = Kp * (temp_set - temp_curr);
+  float ki = Ki * (error);
+  float kd = Kd * (temp_curr - 2*temp_h0 + temp_h1);
+  //temp_h1=temp_h0;*/
+  temp_h0 = temp_curr;
+  /*if (error>0 && power==0) {
+    power=100;
+  } */
+    //power = max(power,1) * (error/max(temp_change,0.1));
+   power = min(max(power_points[i-1],10) * max(min(error/max(temp_change,0.1),2),0.5), max(power_avg*2,10));
+   
+  if((temp_curr - temp_set) > 3 || temp_set<25 )  {                        //prevent overheat) 
+    power=0;
+  }
+  power = constrain (power,0,255);
+}
+
+void power_monitoring() {
+  //power_points[];
+  power_points[i]=power;
+  i++;
+  if (i==30){i=0;}
+  power_avg=0;
+  for (j=0; j<30; j++) {
+    power_avg+=power_points[j];
+  }
+  power_avg/=30;
+  Serial.print(" ");Serial.print(power_avg);
+  if ((power_avg < power_idle)) {
+    // idle countdown
+	time_to_idle-=cycle_time;
+ 
+  } else {reset_time_to_idle();}
+  
+  if (time_to_idle<idle_time_treshold) {
+    //time_to_idle=0;
+	idle=1;
+	Serial.print(" IdlE");
+  }
+  if (time_to_idle<0) {
+    //power off
+    time_to_idle=0;
+    timedout=1;
+    Serial.print(" Off");
+  }
+  
+}
+
+void reset_time_to_idle() {
+  time_to_idle = default_time_to_poweroff;                   //minutes to turn idle mode
+  time_to_idle *= 60000; 
+  idle=0;
+  timedout=0;
 }
 
 /****************** display ****************/
@@ -261,7 +370,13 @@ void draw_value(String value_to_display){
 	display.setTextSize(2);
     display.setCursor(20,11);
     display.setTextColor(1,0);
+	if (!idle) {
     display.println(value_to_display+ String(char(247)) + "C");
+	} else if(timedout){
+	  display.println("  Off");
+	}else{
+    display.println(" Idle");
+	}
     display.display();
 
 display.setTextSize(1);
